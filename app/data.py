@@ -9,6 +9,8 @@ from typing import Dict, List, Optional, Tuple
 
 from uuid import uuid4
 
+from app import model as ai_model
+
 DATASET_ROOT = Path(__file__).resolve().parent / "dataset"
 
 # Prediction records are stored in-memory for the prototype.
@@ -205,9 +207,15 @@ def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: s
     if male is None or female is None:
         raise ValueError("Strain ID가 존재하지 않습니다.")
 
+    predictions = ai_model.predict(model_id, male_id, female_id)
+
+    predicted_phenotype = {
+        trait: {"value": value} for trait, value in predictions.items()
+    }
+
     prediction_body = {
         "id": _make_prediction_id(),
-        "predictedPhenotype": _compute_predicted_phenotype(dataset, male, female),
+        "predictedPhenotype": predicted_phenotype,
         "createdAt": _iso_now(),
     }
 

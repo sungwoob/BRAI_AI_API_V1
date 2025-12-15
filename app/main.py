@@ -110,16 +110,21 @@ def _validate_prediction_inputs(payload: Optional[Dict]) -> Optional[JSONRespons
     if not dataset_id:
         return _bad_request("데이터세트 ID가 필요합니다.")
 
-    if data.get_dataset(dataset_id) is None:
+    dataset = data.get_dataset(dataset_id)
+    if dataset is None:
         return _bad_request("데이터세트를 찾을 수 없습니다.")
-    if model.get_model(model_id) is None:
+    model_info = model.get_model(model_id)
+    if model_info is None:
         return _bad_request("모델 ID가 존재하지 않습니다.")
 
-    dataset = data.get_dataset(dataset_id)
     if male_id not in dataset["strains"] or female_id not in dataset["strains"]:
         return _bad_request("계통 ID가 존재하지 않습니다.")
     if data.get_strain(male_id) is None or data.get_strain(female_id) is None:
         return _bad_request("계통 ID가 존재하지 않습니다.")
+
+    line_ids = model_info.get("lineIds", [])
+    if line_ids and (male_id not in line_ids or female_id not in line_ids):
+        return _bad_request("모델에서 지원하지 않는 계통 ID입니다.")
 
     return None
 
@@ -135,7 +140,10 @@ def create_prediction(payload: Optional[Dict] = Body(default=None)) -> JSONRespo
     male_id = payload.get("maleStrainId")
     female_id = payload.get("femaleStrainId")
 
-    prediction = data.create_prediction(dataset_id, model_id, male_id, female_id)
+    try:
+        prediction = data.create_prediction(dataset_id, model_id, male_id, female_id)
+    except ValueError as exc:
+        return _bad_request(str(exc))
     return JSONResponse(
         content={
             "success": True,
