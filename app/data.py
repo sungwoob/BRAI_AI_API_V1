@@ -1,18 +1,76 @@
-"""In-memory data backing the BRAI API prototype."""
+"""File-backed data backing the BRAI API prototype."""
 
 from __future__ import annotations
 
 import csv
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from uuid import uuid4
 
-DATASET_ROOT = Path(__file__).resolve().parent / "dataset"
+from app import model as ai_model
 
-# Prediction records are stored in-memory for the prototype.
-PREDICTIONS: List[dict] = []
+DATASET_ROOT = Path(__file__).resolve().parent / "dataset"
+PREDICTIONS_FILE = Path(__file__).resolve().parent / "predictions.csv"
+
+
+def _load_predictions_from_csv() -> List[dict]:
+    if not PREDICTIONS_FILE.exists():
+        return []
+
+    predictions: List[dict] = []
+    with PREDICTIONS_FILE.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            predicted_raw = row.get("predictedPhenotype", "{}")
+            try:
+                predicted_phenotype = json.loads(predicted_raw)
+            except json.JSONDecodeError:
+                predicted_phenotype = {}
+
+            predictions.append(
+                {
+                    "id": row.get("id", ""),
+                    "dataset": row.get("dataset", ""),
+                    "model": row.get("model", ""),
+                    "maleStrainId": row.get("maleStrainId", ""),
+                    "femaleStrainId": row.get("femaleStrainId", ""),
+                    "createdAt": row.get("createdAt", ""),
+                    "predictedPhenotype": predicted_phenotype,
+                }
+            )
+    return predictions
+
+
+def _write_predictions_to_csv(predictions: List[dict]) -> None:
+    fieldnames = [
+        "id",
+        "dataset",
+        "model",
+        "maleStrainId",
+        "femaleStrainId",
+        "createdAt",
+        "predictedPhenotype",
+    ]
+
+    with PREDICTIONS_FILE.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in predictions:
+            writer.writerow(
+                {
+                    **record,
+                    "predictedPhenotype": json.dumps(
+                        record.get("predictedPhenotype", {}), ensure_ascii=False
+                    ),
+                }
+            )
+
+
+# Prediction records are stored in-memory for performance, and persisted to CSV.
+PREDICTIONS: List[dict] = _load_predictions_from_csv()
 
 
 def _dataset_directory(dataset_id: str) -> Path:
@@ -205,9 +263,15 @@ def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: s
     if male is None or female is None:
         raise ValueError("Strain ID가 존재하지 않습니다.")
 
+    predictions = ai_model.predict(model_id, male_id, female_id)
+
+    predicted_phenotype = {
+        trait: {"value": value} for trait, value in predictions.items()
+    }
+
     prediction_body = {
         "id": _make_prediction_id(),
-        "predictedPhenotype": _compute_predicted_phenotype(dataset, male, female),
+        "predictedPhenotype": predicted_phenotype,
         "createdAt": _iso_now(),
     }
 
@@ -219,6 +283,7 @@ def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: s
         **prediction_body,
     }
     PREDICTIONS.append(record)
+    _write_predictions_to_csv(PREDICTIONS)
     return prediction_body
 
 
