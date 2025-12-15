@@ -150,9 +150,9 @@ def get_strain(strain_id: str) -> Optional[dict]:
 
     for dataset_id in list_datasets():
         dataset_dir = _dataset_directory(dataset_id)
-        strain = _load_strain_from_dataset(dataset_dir, strain_id)
-        if strain:
-            return strain
+        phenotype = _load_phenotype_values(dataset_dir, strain_id)
+        if phenotype is not None:
+            return {"id": strain_id, "name": strain_id, "phenotype": phenotype}
 
     return None
 
