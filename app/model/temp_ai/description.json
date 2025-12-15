@@ -1,0 +1,7 @@
+{
+    "id": "temp_ai",
+    "name": "temp_ai",
+    "modelType": "combiationAbility",
+    "modelDetail": "radomforest",
+    "trainedBy": "TC1"
+}
