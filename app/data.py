@@ -11,94 +11,6 @@ from uuid import uuid4
 
 DATASET_ROOT = Path(__file__).resolve().parent / "dataset"
 
-# Strain metadata keyed by strain ID.
-STRAINS: Dict[str, dict] = {
-    "TC1_001": {
-        "id": "TC1_001",
-        "name": "TC1_001",
-        "type": "both",
-        "phenotype": {
-            "weight": 45.12,
-            "length": 43.87,
-            "width": 37.98,
-            "ratio": 1.15,
-            "brix": 5.11,
-            "firmness": 0.49,
-            "skinThickness": 6.73,
-            "shape": "round",
-        },
-    },
-    "TC1_022": {
-        "id": "TC1_022",
-        "name": "TC1_022",
-        "type": "both",
-        "phenotype": {
-            "weight": 47.24,
-            "length": 44.38,
-            "width": 38.59,
-            "ratio": 1.15,
-            "brix": 5.24,
-            "firmness": 0.51,
-            "skinThickness": 6.81,
-            "shape": "round",
-        },
-    },
-    "AI_101": {
-        "id": "AI_101",
-        "name": "AI_101",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 39.02,
-            "length": 40.12,
-            "width": 34.87,
-            "brix": 6.15,
-            "firmness": 0.62,
-        },
-    },
-    "AI_142": {
-        "id": "AI_142",
-        "name": "AI_142",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 42.88,
-            "length": 42.05,
-            "width": 36.02,
-            "brix": 6.02,
-            "firmness": 0.66,
-        },
-    },
-    "AI_213": {
-        "id": "AI_213",
-        "name": "AI_213",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 41.33,
-            "length": 41.77,
-            "width": 35.75,
-            "brix": 6.44,
-            "firmness": 0.59,
-        },
-    },
-}
-
-# Model metadata keyed by model ID.
-MODELS: Dict[str, dict] = {
-    "sj_rf": {
-        "id": "sj_rf",
-        "name": "sj_rf",
-        "modelType": "combiationAbility",
-        "modelDetail": "radomforest",
-        "trainedBy": "AI",
-    },
-    "keti_ai": {
-        "id": "keti_ai",
-        "name": "keti_ai",
-        "modelType": "combiationAbility",
-        "modelDetail": "radomforest",
-        "trainedBy": "TC1",
-    },
-}
-
 # Prediction records are stored in-memory for the prototype.
 PREDICTIONS: List[dict] = []
 
@@ -191,6 +103,20 @@ def _load_phenotype_values(dataset_dir: Path, strain_id: str) -> Optional[dict]:
     return None
 
 
+def _load_strain_from_dataset(dataset_dir: Path, strain_id: str) -> Optional[dict]:
+    """Load strain metadata from dataset files."""
+
+    strain_ids, _ = _load_strain_metadata(dataset_dir)
+    if strain_id not in strain_ids:
+        return None
+
+    phenotype = _load_phenotype_values(dataset_dir, strain_id)
+    strain: Dict[str, object] = {"id": strain_id, "name": strain_id}
+    if phenotype:
+        strain["phenotype"] = phenotype
+    return strain
+
+
 def list_datasets() -> List[str]:
     """Return sorted dataset identifiers from the dataset directory."""
 
@@ -222,32 +148,13 @@ def get_dataset(dataset_id: str) -> Optional[dict]:
 def get_strain(strain_id: str) -> Optional[dict]:
     """Fetch a single strain by its identifier."""
 
-    strain = STRAINS.get(strain_id)
-
     for dataset_id in list_datasets():
         dataset_dir = _dataset_directory(dataset_id)
-        phenotype = _load_phenotype_values(dataset_dir, strain_id)
-        if phenotype is None:
-            continue
+        strain = _load_strain_from_dataset(dataset_dir, strain_id)
+        if strain:
+            return strain
 
-        if strain is None:
-            strain = {"id": strain_id, "name": strain_id}
-        strain = {**strain, "phenotype": phenotype}
-        break
-
-    return strain
-
-
-def list_models() -> List[str]:
-    """Return sorted model identifiers."""
-
-    return sorted(MODELS.keys())
-
-
-def get_model(model_id: str) -> Optional[dict]:
-    """Fetch a single model by its identifier."""
-
-    return MODELS.get(model_id)
+    return None
 
 
 def _iso_now() -> str:
@@ -291,8 +198,12 @@ def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: s
     dataset = get_dataset(dataset_id)
     if dataset is None:
         raise ValueError(f"Dataset '{dataset_id}' not found")
-    male = STRAINS[male_id]
-    female = STRAINS[female_id]
+    dataset_dir = _dataset_directory(dataset_id)
+    male = _load_strain_from_dataset(dataset_dir, male_id)
+    female = _load_strain_from_dataset(dataset_dir, female_id)
+
+    if male is None or female is None:
+        raise ValueError("Strain ID가 존재하지 않습니다.")
 
     prediction_body = {
         "id": _make_prediction_id(),

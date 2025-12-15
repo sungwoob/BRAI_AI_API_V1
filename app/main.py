@@ -5,7 +5,7 @@ from typing import Dict, Optional
 from fastapi import Body, FastAPI, Query
 from fastapi.responses import JSONResponse
 
-from app import data
+from app import data, model
 
 app = FastAPI(
     title="BRAI API Prototype",
@@ -61,7 +61,7 @@ def get_strain(strain_id: str) -> JSONResponse:
 @app.get("/api/models")
 @app.post("/api/models")
 def list_models() -> JSONResponse:
-    models = data.list_models()
+    models = model.list_models()
     return JSONResponse(
         content={
             "success": True,
@@ -78,11 +78,11 @@ def list_models() -> JSONResponse:
 @app.get("/api/models/{model_id}")
 @app.post("/api/models/{model_id}")
 def get_model(model_id: str) -> JSONResponse:
-    model = data.get_model(model_id)
-    if model is None:
+    model_info = model.get_model(model_id)
+    if model_info is None:
         return _not_found("모델을 찾을 수 없습니다")
 
-    return JSONResponse(content={"success": True, "data": [model]})
+    return JSONResponse(content={"success": True, "data": [model_info]})
 
 
 @app.get("/")
@@ -112,7 +112,7 @@ def _validate_prediction_inputs(payload: Optional[Dict]) -> Optional[JSONRespons
 
     if data.get_dataset(dataset_id) is None:
         return _bad_request("데이터세트를 찾을 수 없습니다.")
-    if data.get_model(model_id) is None:
+    if model.get_model(model_id) is None:
         return _bad_request("모델 ID가 존재하지 않습니다.")
 
     dataset = data.get_dataset(dataset_id)
