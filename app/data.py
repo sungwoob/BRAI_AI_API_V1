@@ -148,6 +148,49 @@ def _load_phenotype_columns(dataset_dir: Path) -> List[str]:
     )
 
 
+def _load_phenotype_values(dataset_dir: Path, strain_id: str) -> Optional[dict]:
+    """Load phenotype values for a strain from the dataset CSV."""
+
+    phenotype_csv = dataset_dir / "phenotype" / "phenotype.csv"
+    if not phenotype_csv.exists():
+        return None
+
+    encodings = ("utf-8-sig", "utf-8", "cp949", "euc-kr")
+    last_error: Optional[Exception] = None
+    for enc in encodings:
+        try:
+            with phenotype_csv.open(newline="", encoding=enc) as handle:
+                reader = csv.reader(handle)
+                header = next(reader, [])
+                for row in reader:
+                    if not row:
+                        continue
+                    if row[0] != strain_id:
+                        continue
+
+                    phenotype: Dict[str, object] = {}
+                    for key, value in zip(header[1:], row[1:]):
+                        if value == "":
+                            phenotype[key] = None
+                            continue
+                        try:
+                            phenotype[key] = float(value)
+                        except ValueError:
+                            phenotype[key] = value
+                    return phenotype
+                return None
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise ValueError(
+            f"Cannot decode phenotype.csv with supported encodings: {phenotype_csv}"
+        )
+
+    return None
+
+
 def list_datasets() -> List[str]:
     """Return sorted dataset identifiers from the dataset directory."""
 
@@ -179,7 +222,20 @@ def get_dataset(dataset_id: str) -> Optional[dict]:
 def get_strain(strain_id: str) -> Optional[dict]:
     """Fetch a single strain by its identifier."""
 
-    return STRAINS.get(strain_id)
+    strain = STRAINS.get(strain_id)
+
+    for dataset_id in list_datasets():
+        dataset_dir = _dataset_directory(dataset_id)
+        phenotype = _load_phenotype_values(dataset_dir, strain_id)
+        if phenotype is None:
+            continue
+
+        if strain is None:
+            strain = {"id": strain_id, "name": strain_id}
+        strain = {**strain, "phenotype": phenotype}
+        break
+
+    return strain
 
 
 def list_models() -> List[str]:
