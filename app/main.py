@@ -8,7 +8,7 @@ from app import data
 app = FastAPI(
     title="BRAI API Prototype",
     version="1.0.0",
-    description="Implements the endpoints described in spec/API_SPECIFICATION_v1.1.md",
+    description="Implements the endpoints described in spec/API_SPECIFICATION_v1.2.md",
 )
 
 
@@ -51,6 +51,31 @@ def get_strain(strain_id: str) -> JSONResponse:
         return _not_found("계통을 찾을 수 없습니다")
 
     return JSONResponse(content={"success": True, "data": [strain]})
+
+
+@app.get("/api/models")
+def list_models() -> JSONResponse:
+    models = data.list_models()
+    return JSONResponse(
+        content={
+            "success": True,
+            "data": [
+                {
+                    "models": models,
+                    "numberOfDatasets": len(models),
+                }
+            ],
+        }
+    )
+
+
+@app.get("/api/models/{model_id}")
+def get_model(model_id: str) -> JSONResponse:
+    model = data.get_model(model_id)
+    if model is None:
+        return _not_found("모델을 찾을 수 없습니다")
+
+    return JSONResponse(content={"success": True, "data": [model]})
 
 
 @app.get("/")
