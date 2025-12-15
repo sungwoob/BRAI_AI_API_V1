@@ -133,11 +133,19 @@ def _load_phenotype_columns(dataset_dir: Path) -> List[str]:
     if not phenotype_csv.exists():
         return []
 
-    with phenotype_csv.open(newline="", encoding="utf-8") as handle:
-        reader = csv.reader(handle)
-        header = next(reader, [])
+    # Try multiple encodings (Excel/Windows KR data often comes as cp949/euc-kr)
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            with phenotype_csv.open(newline="", encoding=enc) as handle:
+                reader = csv.reader(handle)
+                header = next(reader, [])
+            return header[1:] if header else []
+        except UnicodeDecodeError:
+            continue
 
-    return header[1:] if header else []
+    raise ValueError(
+        f"Cannot decode phenotype.csv with supported encodings: {phenotype_csv}"
+    )
 
 
 def list_datasets() -> List[str]:
