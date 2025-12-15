@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Dict, List, Optional
+
+from uuid import uuid4
 
 # Dataset metadata keyed by dataset ID.
 DATASETS: Dict[str, dict] = {
@@ -142,6 +145,9 @@ MODELS: Dict[str, dict] = {
     },
 }
 
+# Prediction records are stored in-memory for the prototype.
+PREDICTIONS: List[dict] = []
+
 
 def list_datasets() -> List[str]:
     """Return sorted dataset identifiers."""
@@ -171,3 +177,102 @@ def get_model(model_id: str) -> Optional[dict]:
     """Fetch a single model by its identifier."""
 
     return MODELS.get(model_id)
+
+
+def _iso_now() -> str:
+    """Return a millisecond-precision UTC timestamp in ISO 8601 format."""
+
+    return datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+
+
+def _make_prediction_id() -> str:
+    """Create a unique prediction identifier."""
+
+    return f"PRED_{int(datetime.utcnow().timestamp() * 1000)}_{uuid4().hex[:8]}"
+
+
+def _compute_predicted_phenotype(dataset: dict, male: dict, female: dict) -> dict:
+    """Generate a deterministic predicted phenotype payload."""
+
+    result: Dict[str, dict] = {}
+    for trait in dataset.get("phenotype", []):
+        male_val = male.get("phenotype", {}).get(trait)
+        female_val = female.get("phenotype", {}).get(trait)
+
+        numeric_values = [
+            value for value in (male_val, female_val) if isinstance(value, (int, float))
+        ]
+        if numeric_values:
+            avg_value = round(sum(numeric_values) / len(numeric_values), 2)
+            result[trait] = {"value": avg_value, "confidence": 0.9, "grade": 3}
+            continue
+
+        text_value = male_val if male_val is not None else female_val
+        if text_value is not None:
+            result[trait] = {"value": text_value, "confidence": 0.9}
+
+    return result
+
+
+def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: str) -> dict:
+    """Create and store a new prediction record."""
+
+    dataset = DATASETS[dataset_id]
+    male = STRAINS[male_id]
+    female = STRAINS[female_id]
+
+    prediction_body = {
+        "id": _make_prediction_id(),
+        "predictedPhenotype": _compute_predicted_phenotype(dataset, male, female),
+        "createdAt": _iso_now(),
+    }
+
+    record = {
+        "dataset": dataset_id,
+        "model": model_id,
+        "maleStrainId": male_id,
+        "femaleStrainId": female_id,
+        **prediction_body,
+    }
+    PREDICTIONS.append(record)
+    return prediction_body
+
+
+def list_predictions(page: int, limit: int, sort: str) -> dict:
+    """Return paginated predictions sorted by creation date."""
+
+    reverse = sort.lower() != "asc"
+    ordered = sorted(PREDICTIONS, key=lambda item: item["createdAt"], reverse=reverse)
+
+    start = (page - 1) * limit
+    end = start + limit
+    page_items = ordered[start:end]
+
+    return {
+        "items": page_items,
+        "total": len(ordered),
+        "page": page,
+        "limit": limit,
+        "hasMore": end < len(ordered),
+    }
+
+
+def list_combinations() -> List[str]:
+    """Return every unique (female-male) strain combination from stored predictions."""
+
+    combinations = {
+        f"{record['femaleStrainId']}-{record['maleStrainId']}" for record in PREDICTIONS
+    }
+    return sorted(combinations)
+
+
+def get_prediction_by_combination(male_id: str, female_id: str) -> Optional[dict]:
+    """Find a prediction by its male/female strain identifiers."""
+
+    for record in PREDICTIONS:
+        if (
+            record["maleStrainId"] == male_id
+            and record["femaleStrainId"] == female_id
+        ):
+            return record
+    return None
