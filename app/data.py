@@ -2,181 +2,159 @@
 
 from __future__ import annotations
 
+import csv
 from datetime import datetime
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from uuid import uuid4
 
-# Dataset metadata keyed by dataset ID.
-DATASETS: Dict[str, dict] = {
-    "TC1": {
-        "id": "TC1",
-        "name": "TC1",
-        "strains": [
-            "TC1_001",
-            "TC1_002",
-            "TC1_003",
-            "TC1_022",
-        ],
-        "phenotype": [
-            "weight",
-            "length",
-            "width",
-            "ratio",
-            "brix",
-            "firmness",
-            "skinThickness",
-            "shape",
-        ],
-        "snpInfo": {
-            "chr": ["1", "1", "1", "1", "1"],
-            "bp": ["20288", "62862", "65279", "65409", "65869"],
-            "numberOfSNP": 5,
-        },
-    },
-    "AI": {
-        "id": "AI",
-        "name": "AI",
-        "strains": [
-            "AI_101",
-            "AI_142",
-            "AI_213",
-        ],
-        "phenotype": [
-            "weight",
-            "length",
-            "width",
-            "brix",
-            "firmness",
-        ],
-        "snpInfo": {
-            "chr": ["2", "2", "3"],
-            "bp": ["85201", "103992", "209331"],
-            "numberOfSNP": 3,
-        },
-    },
-}
-
-# Strain metadata keyed by strain ID.
-STRAINS: Dict[str, dict] = {
-    "TC1_001": {
-        "id": "TC1_001",
-        "name": "TC1_001",
-        "type": "both",
-        "phenotype": {
-            "weight": 45.12,
-            "length": 43.87,
-            "width": 37.98,
-            "ratio": 1.15,
-            "brix": 5.11,
-            "firmness": 0.49,
-            "skinThickness": 6.73,
-            "shape": "round",
-        },
-    },
-    "TC1_022": {
-        "id": "TC1_022",
-        "name": "TC1_022",
-        "type": "both",
-        "phenotype": {
-            "weight": 47.24,
-            "length": 44.38,
-            "width": 38.59,
-            "ratio": 1.15,
-            "brix": 5.24,
-            "firmness": 0.51,
-            "skinThickness": 6.81,
-            "shape": "round",
-        },
-    },
-    "AI_101": {
-        "id": "AI_101",
-        "name": "AI_101",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 39.02,
-            "length": 40.12,
-            "width": 34.87,
-            "brix": 6.15,
-            "firmness": 0.62,
-        },
-    },
-    "AI_142": {
-        "id": "AI_142",
-        "name": "AI_142",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 42.88,
-            "length": 42.05,
-            "width": 36.02,
-            "brix": 6.02,
-            "firmness": 0.66,
-        },
-    },
-    "AI_213": {
-        "id": "AI_213",
-        "name": "AI_213",
-        "type": "fruit",
-        "phenotype": {
-            "weight": 41.33,
-            "length": 41.77,
-            "width": 35.75,
-            "brix": 6.44,
-            "firmness": 0.59,
-        },
-    },
-}
-
-# Model metadata keyed by model ID.
-MODELS: Dict[str, dict] = {
-    "sj_rf": {
-        "id": "sj_rf",
-        "name": "sj_rf",
-        "modelType": "combiationAbility",
-        "modelDetail": "radomforest",
-        "trainedBy": "AI",
-    },
-    "keti_ai": {
-        "id": "keti_ai",
-        "name": "keti_ai",
-        "modelType": "combiationAbility",
-        "modelDetail": "radomforest",
-        "trainedBy": "TC1",
-    },
-}
+DATASET_ROOT = Path(__file__).resolve().parent / "dataset"
 
 # Prediction records are stored in-memory for the prototype.
 PREDICTIONS: List[dict] = []
 
 
-def list_datasets() -> List[str]:
-    """Return sorted dataset identifiers."""
+def _dataset_directory(dataset_id: str) -> Path:
+    return DATASET_ROOT / dataset_id
 
-    return sorted(DATASETS.keys())
+
+def _load_strain_metadata(dataset_dir: Path) -> Tuple[List[str], dict]:
+    strains_csv = dataset_dir / "strains" / "strains.csv"
+    if not strains_csv.exists():
+        return [], {"chr": [], "bp": [], "numberOfSNP": 0}
+
+    with strains_csv.open(newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        header = next(reader, [])
+        strain_ids = header[3:] if len(header) > 3 else []
+
+        chr_values: List[str] = []
+        bp_values: List[str] = []
+        for row in reader:
+            if len(row) < 3:
+                continue
+            chr_values.append(row[1])
+            bp_values.append(row[2])
+
+    return strain_ids, {"chr": chr_values, "bp": bp_values, "numberOfSNP": len(bp_values)}
+
+
+def _load_phenotype_columns(dataset_dir: Path) -> List[str]:
+    phenotype_csv = dataset_dir / "phenotype" / "phenotype.csv"
+    if not phenotype_csv.exists():
+        return []
+
+    # Try multiple encodings (Excel/Windows KR data often comes as cp949/euc-kr)
+    for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
+        try:
+            with phenotype_csv.open(newline="", encoding=enc) as handle:
+                reader = csv.reader(handle)
+                header = next(reader, [])
+            return header[1:] if header else []
+        except UnicodeDecodeError:
+            continue
+
+    raise ValueError(
+        f"Cannot decode phenotype.csv with supported encodings: {phenotype_csv}"
+    )
+
+
+def _load_phenotype_values(dataset_dir: Path, strain_id: str) -> Optional[dict]:
+    """Load phenotype values for a strain from the dataset CSV."""
+
+    phenotype_csv = dataset_dir / "phenotype" / "phenotype.csv"
+    if not phenotype_csv.exists():
+        return None
+
+    encodings = ("utf-8-sig", "utf-8", "cp949", "euc-kr")
+    last_error: Optional[Exception] = None
+    for enc in encodings:
+        try:
+            with phenotype_csv.open(newline="", encoding=enc) as handle:
+                reader = csv.reader(handle)
+                header = next(reader, [])
+                for row in reader:
+                    if not row:
+                        continue
+                    if row[0] != strain_id:
+                        continue
+
+                    phenotype: Dict[str, object] = {}
+                    for key, value in zip(header[1:], row[1:]):
+                        if value == "":
+                            phenotype[key] = None
+                            continue
+                        try:
+                            phenotype[key] = float(value)
+                        except ValueError:
+                            phenotype[key] = value
+                    return phenotype
+                return None
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+
+    if last_error is not None:
+        raise ValueError(
+            f"Cannot decode phenotype.csv with supported encodings: {phenotype_csv}"
+        )
+
+    return None
+
+
+def _load_strain_from_dataset(dataset_dir: Path, strain_id: str) -> Optional[dict]:
+    """Load strain metadata from dataset files."""
+
+    strain_ids, _ = _load_strain_metadata(dataset_dir)
+    if strain_id not in strain_ids:
+        return None
+
+    phenotype = _load_phenotype_values(dataset_dir, strain_id)
+    strain: Dict[str, object] = {"id": strain_id, "name": strain_id}
+    if phenotype:
+        strain["phenotype"] = phenotype
+    return strain
+
+
+def list_datasets() -> List[str]:
+    """Return sorted dataset identifiers from the dataset directory."""
+
+    if not DATASET_ROOT.exists():
+        return []
+
+    return sorted(item.name for item in DATASET_ROOT.iterdir() if item.is_dir())
 
 
 def get_dataset(dataset_id: str) -> Optional[dict]:
-    """Fetch a single dataset by its identifier."""
+    """Fetch a single dataset by reading the corresponding dataset folder."""
 
-    return DATASETS.get(dataset_id)
+    dataset_dir = _dataset_directory(dataset_id)
+    if not dataset_dir.is_dir():
+        return None
+
+    strains, snp_info = _load_strain_metadata(dataset_dir)
+    phenotype = _load_phenotype_columns(dataset_dir)
+
+    return {
+        "id": dataset_id,
+        "name": dataset_id,
+        "strains": strains,
+        "phenotype": phenotype,
+        "snpInfo": snp_info,
+    }
 
 
 def get_strain(strain_id: str) -> Optional[dict]:
     """Fetch a single strain by its identifier."""
 
-    return STRAINS.get(strain_id)
+    for dataset_id in list_datasets():
+        dataset_dir = _dataset_directory(dataset_id)
+        strain = _load_strain_from_dataset(dataset_dir, strain_id)
+        if strain:
+            return strain
 
-
-def list_models() -> List[str]:
-    """Return sorted model identifiers."""
-
-    return sorted(MODELS.keys())
-
-
-def get_model(model_id: str) -> Optional[dict]:
-    """Fetch a single model by its identifier."""
-
-    return MODELS.get(model_id)
+    return None
 
 
 def _iso_now() -> str:
@@ -217,9 +195,15 @@ def _compute_predicted_phenotype(dataset: dict, male: dict, female: dict) -> dic
 def create_prediction(dataset_id: str, model_id: str, male_id: str, female_id: str) -> dict:
     """Create and store a new prediction record."""
 
-    dataset = DATASETS[dataset_id]
-    male = STRAINS[male_id]
-    female = STRAINS[female_id]
+    dataset = get_dataset(dataset_id)
+    if dataset is None:
+        raise ValueError(f"Dataset '{dataset_id}' not found")
+    dataset_dir = _dataset_directory(dataset_id)
+    male = _load_strain_from_dataset(dataset_dir, male_id)
+    female = _load_strain_from_dataset(dataset_dir, female_id)
+
+    if male is None or female is None:
+        raise ValueError("Strain ID가 존재하지 않습니다.")
 
     prediction_body = {
         "id": _make_prediction_id(),
